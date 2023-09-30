@@ -57,38 +57,33 @@ app.get('/', (_req, res) => {
 // Use PATCH to update the availability attribute directly 
 app.patch('/courses/availability', async (req, res) => {
   try {
-    const { UserID, CourseID, IsAvailable } = req.body;
+    const { AdminID, CourseID, IsAvailable } = req.body;
 
     // Validate IsAvailable - 1 for available, 0 for not available.
     if (IsAvailable !== 0 && IsAvailable !== 1) {
-      return res.status(400).json({ error: 'Invalid value for IsAvailable. It should be 0 or 1.' });
-    }
-
-    const [results] = await db.query(`SELECT RoleID FROM users WHERE UserID = ?`, [UserID]);
-
-    if (results.length === 0) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-
-    const userRoleID = results[0].RoleID;
-
-    // Check if the course exists first!
-    const [courseResults] = await db.query(`SELECT * FROM courses WHERE CourseID = ?`, [CourseID]);
-    if (courseResults.length === 0) {
-      return res.status(404).json({ error: 'Course not found' });
+      return res.status(400).json({ error: 'Invalid availability status. Acceptable values are 0 (not available) or 1 (available).' });
     }
 
     // FR6: Ensure only the authorised access can perform an action.
     // if the RoleID is 1, the user is an admin and can perform CRUD operations on courses.
-    if (userRoleID === 1) {
-      await db.query(`UPDATE courses SET IsAvailable = ? WHERE CourseID = ?`, [IsAvailable, CourseID]);
-      res.json({ success: 'Course availability updated' });
-    } else {
-      res.status(403).json({ error: 'You are not authorised to perform this action' });
+    const [adminResults] = await db.query(`SELECT RoleID FROM users WHERE UserID = ?`, [AdminID]);
+    if (adminResults.length === 0 || adminResults[0].RoleID !== 1) {
+      return res.status(403).json({ error: 'User is not authorised to perform this action' });
     }
+
+    // Validate if the course exists
+    const [courseResults] = await db.query(`SELECT * FROM courses WHERE CourseID = ?`, [CourseID]);
+    if (courseResults.length === 0) {
+      return res.status(404).json({ error: 'Specified course does not exist' });
+    }
+
+    // Update course availability
+    await db.query(`UPDATE courses SET IsAvailable = ? WHERE CourseID = ?`, [IsAvailable, CourseID]);
+    res.json({ success: 'Course availability successfully updated' });
+
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Internal server error occurred' });
   }
 });
 
@@ -101,7 +96,7 @@ app.post('/courses', async (req, res) => {
       // if the RoleID is 1, the user is an admin and can perform CRUD operations on courses.
       const [adminResults] = await db.query(`SELECT RoleID FROM users WHERE UserID = ?`, [AdminID]);
       if (adminResults.length === 0 || adminResults[0].RoleID !== 1) {
-        return res.status(403).json({ error: 'You are not authorised to perform this action' });
+        return res.status(403).json({ error: 'User is not authorised to perform this action' });
       }
 
       // Validate IsAvailable if provided - 1 for available, 0 (default) for not available.
@@ -147,7 +142,7 @@ app.delete('/courses', async (req, res) => {
     // if the RoleID is 1, the user is an admin and can perform CRUD operations on courses.
     const [adminResults] = await db.query(`SELECT RoleID FROM users WHERE UserID = ?`, [AdminID]);
     if (adminResults.length === 0 || adminResults[0].RoleID !== 1) {
-      return res.status(403).json({ error: 'You are not authorised to perform this action' });
+      return res.status(403).json({ error: 'User is not authorised to perform this action' });
     }
 
     // Check if the course exists first
@@ -184,7 +179,7 @@ app.patch('/courses/assignteacher', async (req, res) => {
       // if the RoleID is 1, the user is an admin and can perform CRUD operations on courses.
       const [adminResults] = await db.query(`SELECT RoleID FROM users WHERE UserID = ?`, [AdminID]);
       if (adminResults.length === 0 || adminResults[0].RoleID !== 1) {
-          return res.status(403).json({ error: 'You are not authorised to perform this action' });
+          return res.status(403).json({ error: 'User is not authorised to perform this action' });
       }
 
       // Validate if the teacher exists and is indeed a teacher
@@ -233,8 +228,8 @@ app.get('/courses', async (_req, res) => {
 });
 
 
-// FR4: Students can enrol in a course. Students should not be able to 
-//      enrol in a course more than once at each time. 
+// FR4: Students can enroll in a course. Students should not be able to 
+//      enroll in a course more than once at each time. 
 
 // Use POST to create a new enrolment record.
 app.post('/student/enroll', async (req, res) => {
@@ -247,7 +242,7 @@ app.post('/student/enroll', async (req, res) => {
     }
 
     // FR6: Ensure only the authorised access can perform an action.
-    // if the RoleID is 3, the user is student and can enrol in a course.
+    // if the RoleID is 3, the user is student and can enroll in a course.
     const [studentResults] = await db.query(`SELECT RoleID FROM users WHERE UserID = ?`, [StudentID]);
     if (studentResults.length === 0 || studentResults[0].RoleID !== 3) {
       return res.status(403).json({ error: 'Student not found.' });
