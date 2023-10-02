@@ -309,6 +309,12 @@ app.patch('/enroll/mark', async (req, res) => {
       return res.status(403).json({ error: 'Teacher not found or is not authorised to perform this action.' });
     }
 
+    // Check if the course exists and the TeacherID matches the teacher of the course
+    const [courseResults] = await db.query(`SELECT * FROM courses WHERE CourseID = ? AND TeacherID = ?`, [CourseID, TeacherID]);
+    if (courseResults.length === 0) {
+      return res.status(403).json({ error: 'Teacher is not authorised to update marks for this course' });
+    }
+
     // Check if the student is enrolled in the course
     const [enrolmentResults] = await db.query(`SELECT * FROM enrolments WHERE CourseID = ? AND UserID = ?`, [CourseID, StudentID]);
     if (enrolmentResults.length === 0) {
