@@ -122,6 +122,12 @@ app.post('/courses', async (req, res) => {
         validTeacherId = TeacherID; // Set the validated teacher ID
       }
 
+      // Check if a course with the same title already exists
+      const [courseExists] = await db.query(`SELECT * FROM courses WHERE Title = ?`, [CourseTitle]);
+      if (courseExists.length > 0) {
+        return res.status(400).json({ error: 'A course with this title already exists' });
+      }
+
       // Create the new course
       await db.query(`INSERT INTO courses (Title, TeacherID, IsAvailable) VALUES (?, ?, ?)`, 
         [CourseTitle, validTeacherId, validIsAvailable]);
@@ -252,6 +258,12 @@ app.post('/student/enroll', async (req, res) => {
     const [courseResults] = await db.query(`SELECT * FROM courses WHERE CourseID = ?`, [CourseID]);
     if (courseResults.length === 0) {
       return res.status(404).json({ error: 'Course not found' });
+    }
+
+    // Check if the course is available for enrollment
+    const [IsAvailableResults] = await db.query(`SELECT IsAvailable FROM courses WHERE CourseID = ?`, [CourseID]);
+    if (IsAvailableResults[0].IsAvailable !== 1) {
+      return res.status(403).json({ error: 'Course is not available for enrollment' });
     }
 
     // Check if the student is already enrolled in the course
