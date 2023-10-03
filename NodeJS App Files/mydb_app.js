@@ -1,7 +1,15 @@
 ///////////////////// Requires & Initial Setup ////////////////////// 
-// requires the express,and mysql2 modules
 const express = require('express');
 const mysql = require('mysql2/promise');
+
+// define constants
+const ADMIN_ROLE = 1;
+const TEACHER_ROLE = 2;
+const STUDENT_ROLE = 3;
+const COURSE_UNAVAILABLE = 0;
+const COURSE_AVAILABLE = 1;
+const FAIL = 0;
+const PASS = 1;
 
 // creates an instance of express and assigns it to the app variable
 const app = express();
@@ -42,10 +50,22 @@ app.use((req, _res, next) => {
   next();
 });
 
+// FR6: Ensure only the authorised access can perform an action.
+const isAuthorised = async (UserID, RoleID) => {
+  const [results] = await db.query(`SELECT RoleID FROM users WHERE UserID = ?`, [UserID]);
+  return results.length > 0 && results[0].RoleID === RoleID;
+};
+
+// Encapsulate frequent course validation logic
+const courseExists = async (CourseID) => {
+  const [courseResults] = await db.query(`SELECT 1 FROM courses WHERE CourseID = ? LIMIT 1`, [CourseID]);
+  return courseResults.length > 0;
+};
+
 
 ////////////////////////////// Routes ///////////////////////////////
 
-// Message if accessed through browser
+// Welcome message for root endpoint
 app.get('/', (_req, res) => {
   res.send('Welcome to the Course Management API');
 });
@@ -59,22 +79,19 @@ app.patch('/courses/availability', async (req, res) => {
   try {
     const { AdminID, CourseID, IsAvailable } = req.body;
 
-    // Validate IsAvailable - 1 for available, 0 for not available.
-    if (IsAvailable !== 0 && IsAvailable !== 1) {
-      return res.status(400).json({ error: 'Invalid availability status. Acceptable values are 0 (not available) or 1 (available).' });
+    // Validate IsAvailable variable
+    if (IsAvailable !== COURSE_UNAVAILABLE && IsAvailable !== COURSE_AVAILABLE) {
+      return res.status(400).json({ error: 'Invalid availability status. Acceptable values are 0 (unavailable) or 1 (available).' });
     }
 
-    // FR6: Ensure only the authorised access can perform an action.
-    // if the RoleID is 1, the user is an admin and can perform CRUD operations on courses.
-    const [adminResults] = await db.query(`SELECT RoleID FROM users WHERE UserID = ?`, [AdminID]);
-    if (adminResults.length === 0 || adminResults[0].RoleID !== 1) {
+    // Only admins and can perform CRUD operations on courses.
+    if (!await isAuthorised(AdminID, ADMIN_ROLE)) {
       return res.status(403).json({ error: 'User is not authorised to perform this action' });
     }
 
-    // Validate if the course exists
-    const [courseResults] = await db.query(`SELECT * FROM courses WHERE CourseID = ?`, [CourseID]);
-    if (courseResults.length === 0) {
-      return res.status(404).json({ error: 'Specified course does not exist' });
+    // Check if the course exists
+    if (!await courseExists(CourseID)) {
+      return res.status(404).json({ error: 'Course not found' });
     }
 
     // Update course availability
@@ -92,18 +109,16 @@ app.post('/courses', async (req, res) => {
   try {
       const { AdminID, CourseTitle, TeacherID, IsAvailable } = req.body;
 
-      // FR6: Ensure only the authorised access can perform an action.
-      // if the RoleID is 1, the user is an admin and can perform CRUD operations on courses.
-      const [adminResults] = await db.query(`SELECT RoleID FROM users WHERE UserID = ?`, [AdminID]);
-      if (adminResults.length === 0 || adminResults[0].RoleID !== 1) {
+      // Only admins and can perform CRUD operations on courses.
+      if (!await isAuthorised(AdminID, ADMIN_ROLE)) {
         return res.status(403).json({ error: 'User is not authorised to perform this action' });
       }
 
-      // Validate IsAvailable if provided - 1 for available, 0 (default) for not available.
-      let validIsAvailable = 0;
+      // Validate IsAvailable if provided
+      let validIsAvailable = COURSE_UNAVAILABLE;
 
       if (IsAvailable) {
-        if (IsAvailable !== 0 && IsAvailable !== 1) {
+        if (IsAvailable !== COURSE_UNAVAILABLE && IsAvailable !== COURSE_AVAILABLE) {
           return res.status(400).json({ error: 'Invalid value for IsAvailable. It should be 0 or 1.' });
         }
         validIsAvailable = IsAvailable; // Set the validated IsAvailable
@@ -115,15 +130,14 @@ app.post('/courses', async (req, res) => {
 
       // If TeacherId is provided, validate it
       if (TeacherID) {
-        const [teacherResults] = await db.query(`SELECT RoleID FROM users WHERE UserID = ?`, [TeacherID]);
-        if (teacherResults.length === 0 || teacherResults[0].RoleID !== 2) {
-          return res.status(404).json({ error: 'Teacher not found or user is not a teacher' });
+        if (!await isAuthorised(TeacherID, TEACHER_ROLE)) {
+          return res.status(403).json({ error: 'Teacher not found or user is not a teacher' });
         }
         validTeacherId = TeacherID; // Set the validated teacher ID
       }
 
       // Check if a course with the same title already exists
-      const [courseExists] = await db.query(`SELECT * FROM courses WHERE Title = ?`, [CourseTitle]);
+      const [courseExists] = await db.query(`SELECT 1 FROM courses WHERE Title = ? LIMIT 1`, [CourseTitle]);
       if (courseExists.length > 0) {
         return res.status(400).json({ error: 'A course with this title already exists' });
       }
@@ -144,21 +158,18 @@ app.delete('/courses', async (req, res) => {
   try {
     const { AdminID, CourseID } = req.body;
 
-    // FR6: Ensure only the authorised access can perform an action.
-    // if the RoleID is 1, the user is an admin and can perform CRUD operations on courses.
-    const [adminResults] = await db.query(`SELECT RoleID FROM users WHERE UserID = ?`, [AdminID]);
-    if (adminResults.length === 0 || adminResults[0].RoleID !== 1) {
+    // Only admins and can perform CRUD operations on courses.
+    if (!await isAuthorised(AdminID, ADMIN_ROLE)) {
       return res.status(403).json({ error: 'User is not authorised to perform this action' });
     }
 
-    // Check if the course exists first
-    const [courseResults] = await db.query(`SELECT * FROM courses WHERE CourseID = ?`, [CourseID]);
-    if (courseResults.length === 0) {
+    // Validate if the course exists
+    if (!await courseExists(CourseID)) {
       return res.status(404).json({ error: 'Course not found' });
     }
 
     // Then check if there are any users enrolled in the course (prevent parent row deletion attempt)
-    const [enrolmentResults] = await db.query(`SELECT * FROM enrolments WHERE CourseID = ?`, [CourseID]);
+    const [enrolmentResults] = await db.query(`SELECT 1 FROM enrolments WHERE CourseID = ? LIMIT 1`, [CourseID]);
     if (enrolmentResults.length > 0) {
       return res.status(400).json({ error: 'Cannot delete course. There are users enrolled in this course.' });
     }
@@ -173,7 +184,6 @@ app.delete('/courses', async (req, res) => {
   }
 });
 
-
 // FR2: Admins should be able to assign one or more courses to a teacher
 
 // Use PATCH to Udpate the teacherID field.
@@ -181,22 +191,18 @@ app.patch('/courses/assignteacher', async (req, res) => {
   try {
       const { AdminID, CourseID, TeacherID } = req.body;
 
-      // FR6: Ensure only the authorised access can perform an action.
-      // if the RoleID is 1, the user is an admin and can perform CRUD operations on courses.
-      const [adminResults] = await db.query(`SELECT RoleID FROM users WHERE UserID = ?`, [AdminID]);
-      if (adminResults.length === 0 || adminResults[0].RoleID !== 1) {
-          return res.status(403).json({ error: 'User is not authorised to perform this action' });
+      // Only admins and can perform CRUD operations on courses.
+      if (!await isAuthorised(AdminID, ADMIN_ROLE)) {
+        return res.status(403).json({ error: 'User is not authorised to perform this action' });
       }
 
-      // Validate if the teacher exists and is indeed a teacher
-      const [teacherResults] = await db.query(`SELECT RoleID FROM users WHERE UserID = ?`, [TeacherID]);
-      if (teacherResults.length === 0 || teacherResults[0].RoleID !== 2) {
-        return res.status(404).json({ error: 'Teacher not found or user is not a teacher' });
+      // Validate teacherID
+      if (!await isAuthorised(TeacherID, TEACHER_ROLE)) {
+        return res.status(403).json({ error: 'Teacher not found or user is not a teacher' });
       }
 
-      // Validate if the course exists
-      const [courseResults] = await db.query(`SELECT * FROM courses WHERE CourseID = ?`, [CourseID]);
-      if (courseResults.length === 0) {
+      // Check if the course exists
+      if (!await courseExists(CourseID)) {
         return res.status(404).json({ error: 'Course not found' });
       }
 
@@ -233,12 +239,11 @@ app.get('/courses', async (_req, res) => {
   }
 });
 
-
-// FR4: Students can enroll in a course. Students should not be able to 
+// FR4: Students can enrol in a course. Students should not be able to 
 //      enroll in a course more than once at each time. 
 
 // Use POST to create a new enrolment record.
-app.post('/student/enroll', async (req, res) => {
+app.post('/student/enrol', async (req, res) => {
   try {
     const { CourseID, StudentID } = req.body;
 
@@ -247,32 +252,29 @@ app.post('/student/enroll', async (req, res) => {
       return res.status(400).json({ error: 'StudentID and CourseID are required' });
     }
 
-    // FR6: Ensure only the authorised access can perform an action.
-    // if the RoleID is 3, the user is student and can enroll in a course.
-    const [studentResults] = await db.query(`SELECT RoleID FROM users WHERE UserID = ?`, [StudentID]);
-    if (studentResults.length === 0 || studentResults[0].RoleID !== 3) {
-      return res.status(403).json({ error: 'Student not found.' });
+    // Check if user is student and can enrol in a course.
+    if (!await isAuthorised(StudentID, STUDENT_ROLE)) {
+      return res.status(403).json({ error: 'Student not found. Please check the student ID' });
     }
 
-    // Validate if the course exists
-    const [courseResults] = await db.query(`SELECT * FROM courses WHERE CourseID = ?`, [CourseID]);
-    if (courseResults.length === 0) {
+    // Check if the course exists
+    if (!await courseExists(CourseID)) {
       return res.status(404).json({ error: 'Course not found' });
     }
 
-    // Check if the course is available for enrollment
+    // Check if the course is available for enrolment
     const [IsAvailableResults] = await db.query(`SELECT IsAvailable FROM courses WHERE CourseID = ?`, [CourseID]);
-    if (IsAvailableResults[0].IsAvailable !== 1) {
-      return res.status(403).json({ error: 'Course is not available for enrollment' });
+    if (IsAvailableResults[0].IsAvailable !== COURSE_AVAILABLE) {
+      return res.status(403).json({ error: 'Course is not available for enrolment' });
     }
 
     // Check if the student is already enrolled in the course
-    const [enrolmentResults] = await db.query(`SELECT * FROM enrolments WHERE CourseID = ? AND UserID = ?`, [CourseID, StudentID]);
+    const [enrolmentResults] = await db.query(`SELECT 1 FROM enrolments WHERE CourseID = ? AND UserID = ? LIMIT 1`, [CourseID, StudentID]);
     if (enrolmentResults.length > 0) {
       return res.status(409).json({ error: 'Student is already enrolled in this course' });
     }
 
-    // Enroll the student in the course
+    // Enrol the student in the course
     await db.query(`INSERT INTO enrolments (Mark, CourseID, UserID) VALUES (NULL, ?, ?)`, [CourseID, StudentID]);
     res.json({ success: 'Student enrolled in course' });
 
@@ -282,13 +284,12 @@ app.post('/student/enroll', async (req, res) => {
   }
 });
 
-
 //************************* Teacher Routes ************************//
 
 // FR5: Teachers can fail or pass a student.
 
 // Use PATCH to update the mark field within the enrolment record.
-app.patch('/enroll/mark', async (req, res) => {
+app.patch('/enrol/mark', async (req, res) => {
   try {
     const { TeacherID, CourseID, StudentID, Mark } = req.body;
 
@@ -297,28 +298,26 @@ app.patch('/enroll/mark', async (req, res) => {
       return res.status(400).json({ error: 'TeacherID, CourseID, StudentID, and Mark are required' });
     }
 
-    // Validate mark - 1 for pass, 0 for fail.
-    if (Mark !== 0 && Mark !== 1) {
+    // Validate mark
+    if (Mark !== FAIL && Mark !== PASS) {
       return res.status(400).json({ error: 'Invalid value for Mark. It should be 0 (fail) or 1 (pass).' });
     }
 
-    // FR6: Ensure only the authorised access can perform an action.
-    // if the RoleID is 2, the user is teacher and can update marks.
-    const [teacherResults] = await db.query(`SELECT RoleID FROM users WHERE UserID = ?`, [TeacherID]);
-    if (teacherResults.length === 0 || teacherResults[0].RoleID !== 2) {
-      return res.status(403).json({ error: 'Teacher not found or is not authorised to perform this action.' });
+    // Check if user is a teacher and has permission to update marks.
+    if (!await isAuthorised(TeacherID, TEACHER_ROLE)) {
+      return res.status(403).json({ error: 'User is not authorised to update the mark' });
     }
 
-    // Check if the course exists and the TeacherID matches the teacher of the course
-    const [courseResults] = await db.query(`SELECT * FROM courses WHERE CourseID = ? AND TeacherID = ?`, [CourseID, TeacherID]);
+    // Check if the teacher is assigned to the course
+    const [courseResults] = await db.query(`SELECT 1 FROM courses WHERE CourseID = ? AND TeacherID = ? LIMIT 1`, [CourseID, TeacherID]);
     if (courseResults.length === 0) {
       return res.status(403).json({ error: 'Teacher is not authorised to update marks for this course' });
     }
 
     // Check if the student is enrolled in the course
-    const [enrolmentResults] = await db.query(`SELECT * FROM enrolments WHERE CourseID = ? AND UserID = ?`, [CourseID, StudentID]);
+    const [enrolmentResults] = await db.query(`SELECT 1 FROM enrolments WHERE CourseID = ? AND UserID = ? LIMIT 1`, [CourseID, StudentID]);
     if (enrolmentResults.length === 0) {
-      return res.status(404).json({ error: 'Enrolment record not found for the given student ID and course ID.' });
+      return res.status(404).json({ error: 'Enrolment record not found for the given student and or course ID.' });
     }
 
     // Update the student's mark for the course
@@ -330,7 +329,6 @@ app.patch('/enroll/mark', async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
-
 
 ///////////////////// Server Start ////////////////////// 
 app.listen(port, () => {
