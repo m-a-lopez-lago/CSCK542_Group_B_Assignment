@@ -125,8 +125,8 @@ app.post('/courses', async (req, res) => {
       }
 
       // Validate if the teacher exists and is indeed a teacher, if a teacherID is provided.
-      // It defaults to null, which will result in a "TBD" teacher name in the available courses list
-      let validTeacherId = null; 
+      // It defaults to 0, which will result in a "TBD" teacher name in the available courses list
+      let validTeacherId = 0; 
 
       // If TeacherId is provided, validate it
       if (TeacherID) {
