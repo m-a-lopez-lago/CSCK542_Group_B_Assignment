@@ -62,6 +62,11 @@ const courseExists = async (CourseID) => {
   return courseResults.length > 0;
 };
 
+// Global internal server error handling 
+app.use((err, _req, res, _next) => {
+  console.error(err.stack);
+  res.status(500).json({ error: 'Internal server error' });
+});
 
 ////////////////////////////// Routes ///////////////////////////////
 
@@ -99,57 +104,55 @@ app.patch('/courses/availability', async (req, res) => {
     res.json({ success: 'Course availability successfully updated' });
 
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Internal server error occurred' });
+      next (err);
   }
 });
 
 // Create a new course using POST
 app.post('/courses', async (req, res) => {
   try {
-    const { AdminID, CourseTitle, TeacherID, IsAvailable } = req.body;
+      const { AdminID, CourseTitle, TeacherID, IsAvailable } = req.body;
 
-    // Only admins and can perform CRUD operations on courses.
-    if (!await isAuthorised(AdminID, ADMIN_ROLE)) {
-      return res.status(403).json({ error: 'User is not authorised to perform this action' });
-    }
-
-    // Validate IsAvailable if provided
-    let validIsAvailable = COURSE_UNAVAILABLE;
-
-    if (IsAvailable) {
-      if (IsAvailable !== COURSE_UNAVAILABLE && IsAvailable !== COURSE_AVAILABLE) {
-        return res.status(400).json({ error: 'Invalid value for IsAvailable. It should be 0 or 1.' });
+      // Only admins and can perform CRUD operations on courses.
+      if (!await isAuthorised(AdminID, ADMIN_ROLE)) {
+        return res.status(403).json({ error: 'User is not authorised to perform this action' });
       }
-      validIsAvailable = IsAvailable; // Set the validated IsAvailable
-    }
 
-    // Validate if the teacher exists and is indeed a teacher, if a teacherID is provided.
-    // It defaults to null, which will result in a "TBD" teacher name in the available courses list
-    let validTeacherId = 0;
+      // Validate IsAvailable if provided
+      let validIsAvailable = COURSE_UNAVAILABLE;
 
-    // If TeacherId is provided, validate it
-    if (TeacherID) {
-      if (!await isAuthorised(TeacherID, TEACHER_ROLE)) {
-        return res.status(403).json({ error: 'Teacher not found or user is not a teacher' });
+      if (IsAvailable) {
+        if (IsAvailable !== COURSE_UNAVAILABLE && IsAvailable !== COURSE_AVAILABLE) {
+          return res.status(400).json({ error: 'Invalid value for IsAvailable. It should be 0 or 1.' });
+        }
+        validIsAvailable = IsAvailable; // Set the validated IsAvailable
       }
-      validTeacherId = TeacherID; // Set the validated teacher ID
-    }
 
-    // Check if a course with the same title already exists
-    const [courseExists] = await db.query(`SELECT 1 FROM courses WHERE Title = ? LIMIT 1`, [CourseTitle]);
-    if (courseExists.length > 0) {
-      return res.status(400).json({ error: 'A course with this title already exists' });
-    }
+      // Validate if the teacher exists and is indeed a teacher, if a teacherID is provided.
+      // It defaults to 0, which will result in a "TBD" teacher name in the available courses list
+      let validTeacherId = 0; 
 
-    // Create the new course
-    await db.query(`INSERT INTO courses (Title, TeacherID, IsAvailable) VALUES (?, ?, ?)`,
-      [CourseTitle, validTeacherId, validIsAvailable]);
-    res.json({ success: 'Course created successfully' });
+      // If TeacherId is provided, validate it
+      if (TeacherID) {
+        if (!await isAuthorised(TeacherID, TEACHER_ROLE)) {
+          return res.status(403).json({ error: 'Teacher not found or user is not a teacher' });
+        }
+        validTeacherId = TeacherID; // Set the validated teacher ID
+      }
 
+      // Check if a course with the same title already exists
+      const [courseExists] = await db.query(`SELECT 1 FROM courses WHERE Title = ? LIMIT 1`, [CourseTitle]);
+      if (courseExists.length > 0) {
+        return res.status(400).json({ error: 'A course with this title already exists' });
+      }
+
+      // Create the new course
+      await db.query(`INSERT INTO courses (Title, TeacherID, IsAvailable) VALUES (?, ?, ?)`, 
+        [CourseTitle, validTeacherId, validIsAvailable]);
+      res.json({ success: 'Course created successfully' });
+    
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Internal server error' });
+      next (err);
   }
 });
 
@@ -179,8 +182,7 @@ app.delete('/courses', async (req, res) => {
     res.json({ success: 'Course deleted successfully' });
 
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Internal server error' });
+      next (err);
   }
 });
 
@@ -189,31 +191,30 @@ app.delete('/courses', async (req, res) => {
 // Use PATCH to Udpate the teacherID field.
 app.patch('/courses/assignteacher', async (req, res) => {
   try {
-    const { AdminID, CourseID, TeacherID } = req.body;
+      const { AdminID, CourseID, TeacherID } = req.body;
 
-    // Only admins and can perform CRUD operations on courses.
-    if (!await isAuthorised(AdminID, ADMIN_ROLE)) {
-      return res.status(403).json({ error: 'User is not authorised to perform this action' });
-    }
+      // Only admins and can perform CRUD operations on courses.
+      if (!await isAuthorised(AdminID, ADMIN_ROLE)) {
+        return res.status(403).json({ error: 'User is not authorised to perform this action' });
+      }
 
-    // Validate teacherID
-    if (!await isAuthorised(TeacherID, TEACHER_ROLE)) {
-      return res.status(403).json({ error: 'Teacher not found or user is not a teacher' });
-    }
+      // Validate teacherID
+      if (!await isAuthorised(TeacherID, TEACHER_ROLE)) {
+        return res.status(403).json({ error: 'Teacher not found or user is not a teacher' });
+      }
 
-    // Check if the course exists
-    if (!await courseExists(CourseID)) {
-      return res.status(404).json({ error: 'Course not found' });
-    }
+      // Check if the course exists
+      if (!await courseExists(CourseID)) {
+        return res.status(404).json({ error: 'Course not found' });
+      }
 
-    // Assign the teacher to the course
-    const query = `UPDATE courses SET TeacherID = ? WHERE CourseID = ?`;
-    await db.query(query, [TeacherID, CourseID]);
-    res.json({ success: 'Teacher assigned to course' });
+      // Assign the teacher to the course
+      const query = `UPDATE courses SET TeacherID = ? WHERE CourseID = ?`;
+      await db.query(query, [TeacherID, CourseID]);
+      res.json({ success: 'Teacher assigned to course' });
 
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Internal server error' });
+      next (err);
   }
 });
 
@@ -234,8 +235,7 @@ app.get('/courses', async (_req, res) => {
     `);
     res.json(results[0]);
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Internal server error' });
+      next (err);
   }
 });
 
@@ -279,8 +279,7 @@ app.post('/student/enrol', async (req, res) => {
     res.json({ success: 'Student enrolled in course' });
 
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Internal server error' });
+      next (err);
   }
 });
 
@@ -325,12 +324,11 @@ app.patch('/enrol/mark', async (req, res) => {
     res.json({ success: 'Student mark updated' });
 
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Internal server error' });
+      next (err);
   }
 });
 
 ///////////////////// Server Start ////////////////////// 
 app.listen(port, () => {
-  console.log(`Server running on http://localhost:${port}`);
+console.log(`Server running on http://localhost:${port}`);
 });
